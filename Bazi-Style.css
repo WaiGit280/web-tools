@@ -1,0 +1,108 @@
+
+/* Single Chinese Bazi Four - 原版樣式 */
+/* 1. 字體 - 必須保留 Google Fonts Import */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@400;500&family=Ma+Shan+Zheng&display=swap');
+
+/* 2. 全局變量 - 原版用色 */
+:root{
+  --bg:#FDFBF7;
+  --bg-soft:#FFFEFB;
+  --stone-50:#fafaf9;
+  --stone-100:#f5f5f4;
+  --stone-200:#e7e5e4;
+  --stone-900:#1c1917;
+  --gold:#C8A44E;
+  --gold-bright:#e8c868;
+  --gold-soft:rgba(200,164,78,0.12);
+  --wuxing-mu:#2A7D4F;
+  --wuxing-huo:#C1332A;
+  --wuxing-tu:#B68A2E;
+  --wuxing-jin:#7A7A7A;
+  --wuxing-shui:#2F6CB0;
+}
+
+/* 3. 全局 Body - 原版設定 */
+body{
+  font-family:"Noto Sans SC", system-ui, -apple-system, sans-serif;
+  background-color:var(--bg);
+  color:#2B2B2B;
+  margin:0;
+  -webkit-font-smoothing:antialiased;
+  background-image: 
+    radial-gradient(ellipse at 30% 20%, rgba(200,164,78,0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 80%, rgba(58,125,110,0.03) 0%, transparent 50%);
+  background-attachment: fixed;
+}
+
+.font-serif{font-family:"Noto Serif SC", serif;}
+.font-display{font-family:"Ma Shan Zheng", cursive;}
+
+/* 4. 滾動條 - 原版6px圓形 */
+::-webkit-scrollbar{height:6px;width:6px}
+::-webkit-scrollbar-thumb{background:#d6d3d1;border-radius:999px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* 5. 卡片通用 - 原版最常用 */
+.card-bazi{
+  border-radius:20px;
+  background:rgba(255,255,255,0.70);
+  backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px);
+  border:1px solid rgba(231,229,228,0.6);
+  box-shadow:0 8px 32px rgba(0,0,0,0.04);
+}
+.card-bazi-dark{
+  border-radius:20px;
+  background:rgba(17,17,17,0.90);
+  color:#f5f5f4;
+  backdrop-filter:blur(20px);
+}
+
+/* 6. 四柱大字 - 原版40-48px */
+.ganzhi-stem{
+  font-size:40px;
+  font-weight:700;
+  line-height:1;
+  font-family:"Noto Serif SC", serif;
+}
+.ganzhi-branch{
+  font-size:44px;
+  font-weight:700;
+  line-height:1;
+  font-family:"Noto Serif SC", serif;
+}
+@media(min-width:768px){
+  .ganzhi-stem{font-size:48px}
+  .ganzhi-branch{font-size:48px}
+}
+
+/* 7. 五行背景 - WUXING_BG */
+.bg-wuxing-mu{background:#E6F2EA}
+.bg-wuxing-huo{background:#FBE9E7}
+.bg-wuxing-tu{background:#FFF6D9}
+.bg-wuxing-jin{background:#F0F0F0}
+.bg-wuxing-shui{background:#E5EEF8}
+
+/* 8. Tab Pill - 原版 */
+.tab-pill-active{
+  background:#1c1917;
+  color:white;
+  box-shadow:0 4px 12px rgba(0,0,0,0.15);
+}
+.tab-pill-inactive{
+  background:white;
+  border:1px solid #e7e5e4;
+  color:#57534e;
+}
+
+/* 9. 分數Badge - 擇日用 */
+.badge-daji{background:#15803d;color:white}
+.badge-zhongji{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}
+.badge-xiaoji{background:#f5f5f4;color:#44403c;border:1px solid #e7e5e4}
+.badge-xiaoxiong{background:#ffedd5;color:#9a3412}
+.badge-daxiong{background:#dc2626;color:white}
+
+/* 10. 時辰卡 - 12時辰網格 */
+.hour-card-ji{ background:rgba(220,252,231,0.8); border-color:#bbf7d0; }
+.hour-card-xiong{ background:rgba(254,226,226,0.8); border-color:#fecaca; }
+.hour-card-ping{ background:rgba(245,245,244,0.8); border-color:#e7e5e4; }

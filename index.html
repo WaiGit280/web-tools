@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>香港玄學 · 八字擇日 · 查日腳</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="Bazi-Style.css" />
+  <script src="Bazi-Calculate.js"></script>
+  <script src="Rijiao-Data.js"></script>
+  <!-- React 18 & Babel Standalone -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="min-h-screen overflow-x-hidden text-stone-800" style="background-color:#fdfbf7; background-image:radial-gradient(1200px 600px at 20% -10%, rgba(200,164,78,0.12), transparent), radial-gradient(1000px 500px at 90% 10%, rgba(120,140,160,0.10), transparent), radial-gradient(800px 400px at 50% 120%, rgba(180,160,120,0.08), transparent);">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect } = React;
+
+    // ===== UI Primitives - original detailed style =====
+    function Card({ children, className = "" }) {
+      return (
+        <div className={`rounded-[20px] bg-white/70 backdrop-blur-xl border border-stone-200/60 shadow-[0_8px_32px_rgba(60,50,30,0.06)] ${className}`}>
+          {children}
+        </div>
+      );
+    }
+
+    function InputPill(props) {
+      return (
+        <input
+          {...props}
+          className={`rounded-full bg-stone-50 border border-stone-200 px-3 py-2 text-[13px] focus:outline-none focus:border-stone-300 focus:bg-white transition ${props.className || ""}`}
+        />
+      );
+    }
+
+    function SelectPill(props) {
+      return (
+        <select
+          {...props}
+          className={`rounded-full bg-stone-50 border border-stone-200 px-3 py-2 text-[13px] focus:outline-none focus:border-stone-300 ${props.className || ""}`}
+        />
+      );
+    }
+
+    // 五行雷達圖組件 (純 SVG 高精度實作，與原版 Recharts 視覺 1:1 一致且零外部依賴衝突)
+    function WuxingRadarChart({ data }) {
+      const cx = 130, cy = 98, R = 68;
+      const levels = [1, 2, 3, 4];
+      const n = data.length || 5;
+      const getPoint = (idx, val, max = 4) => {
+        const angle = -Math.PI / 2 + (idx * 2 * Math.PI) / n;
+        const r = (Math.min(max, Math.max(0, val)) / max) * R;
+        return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
+      };
+
+      const polygonPoints = data.map((d, i) => getPoint(i, d.A, d.fullMark || 4).join(",")).join(" ");
+
+      return (
+        <svg viewBox="0 0 260 196" className="w-full h-full select-none">
+          {/* PolarGrid 同心五邊形 */}
+          {levels.map((lv) => {
+            const pts = data.map((_, i) => getPoint(i, lv, 4).join(",")).join(" ");
+            return <polygon key={lv} points={pts} fill="none" stroke="#e7e5e4" strokeWidth="1" />;
+          })}
+          {/* 軸線 */}
+          {data.map((_, i) => {
+            const [x, y] = getPoint(i, 4, 4);
+            return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#e7e5e4" strokeWidth="1" />;
+          })}
+          {/* Radar 資料區 */}
+          {data.length > 0 && (
+            <polygon
+              points={polygonPoints}
+              stroke={Gold}
+              strokeWidth="2"
+              fill={Gold}
+              fillOpacity={0.28}
+            />
+          )}
+          {/* PolarAngleAxis 標籤 */}
+          {data.map((d, i) => {
+            const [x, y] = getPoint(i, 4.95, 4);
+            return (
+              <text
+                key={d.subject}
+                x={x}
+                y={y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill="#78716c"
+                fontSize="12"
+              >
+                {d.subject}
+              </text>
+            );
+          })}
+        </svg>
+      );
+    }
+
+    function Header({ tab, setTab }) {
+      return (
+        <div className="z-30 border-b border-stone-200/60 bg-[#FDFBF7]/80 backdrop-blur-[18px]">
+          <div className="max-w-[1360px] mx-auto px-4 sm:px-6 md:px-10 py-4 md:py-8">
+            <div className="flex flex-col items-center text-center gap-2 md:gap-3">
+              <div className="flex items-center gap-3">
+                <span className="h-px w-8 bg-stone-300 hidden md:block" />
+                <h1 className="font-serif text-[24px] md:text-[30px] tracking-[0.18em] text-stone-800">香港玄學 · 八字擇日</h1>
+                <span className="h-px w-8 bg-stone-300 hidden md:block" />
+              </div>
+              <p className="text-[10px] md:text-[11px] tracking-[0.18em] md:tracking-[0.24em] text-stone-500">八字排盤 · 雙人合盤 · 黃道擇日 · 查日腳小畚符</p>
+              <div
+                role="tablist"
+                aria-label="主功能分頁"
+                className="mt-2 md:mt-3 grid grid-cols-4 md:flex md:flex-wrap justify-center gap-1.5 md:gap-2 w-full md:w-auto rounded-[24px] md:rounded-full bg-white/60 p-1.5 border border-stone-200/60 shadow-sm"
+              >
+                {[
+                  { k: "personal", l: "八字排盤" },
+                  { k: "hepan", l: "合盤" },
+                  { k: "zeri", l: "擇日" },
+                  { k: "rijiao", l: "查日腳" }
+                ].map((t) => (
+                  <button
+                    key={t.k}
+                    role="tab"
+                    aria-selected={tab === t.k}
+                    onClick={() => {
+                      setTab(t.k);
+                      try {
+                        window.location.hash = t.k;
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      } catch {}
+                    }}
+                    className={`px-2 md:px-6 py-2 rounded-full text-[12px] tracking-[0.08em] md:tracking-[0.16em] border transition-all duration-200
+                    ${tab === t.k ? "bg-stone-900 text-white border-stone-900 shadow" : "bg-white/70 border-stone-200/60 text-stone-600 hover:border-stone-300 hover:text-stone-800"}`}
+                  >
+                    {t.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function PillarDetailCard({ p, label, dayStem }) {
+      const stemWX = STEM_WUXING[p.stem];
+      const branchWX = STEM_WUXING[HIDDEN[p.branch][0].stem];
+      return (
+        <div className="rounded-[20px] bg-white/70 backdrop-blur border border-stone-200/60 p-4 md:p-5 flex flex-col gap-3 shadow-sm">
+          <div className="flex justify-between items-start">
+            <span className="text-[10px] tracking-[0.2em] text-stone-500 border border-stone-200 rounded-full px-2.5 py-1 bg-white/60">{label}</span>
+            <span className="text-[11px] tracking-widest" style={{ color: WUXING_COLOR[stemWX] }}>{p.tenGod}</span>
+          </div>
+          <div className="flex gap-3 items-end justify-center py-1">
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] tracking-widest text-stone-400 mb-1">{stemWX}</span>
+              <span className="font-serif text-[40px] md:text-[48px] leading-[1] font-[500]" style={{ color: WUXING_COLOR[stemWX] }}>{p.stemName}</span>
+              <span className="text-[10px] text-stone-400 mt-1">{STEMS[p.stem]} · {stemWX}</span>
+            </div>
+            <div className="w-px h-12 bg-stone-200/60 mb-2" />
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] tracking-widest text-stone-400 mb-1">{branchWX}</span>
+              <span className="font-serif text-[40px] md:text-[48px] leading-[1] font-[500]" style={{ color: WUXING_COLOR[branchWX] }}>{p.branchName}</span>
+              <span className="text-[10px] text-stone-400 mt-1">{BRANCHES[p.branch]} · {branchWX}</span>
+            </div>
+          </div>
+          <div className="pt-2 border-t border-stone-100 flex flex-col gap-2">
+            <div className="text-[10px] tracking-widest text-stone-500">藏干</div>
+            <div className="flex flex-wrap gap-1.5">
+              {HIDDEN[p.branch].map((h, idx) => (
+                <span
+                  key={idx}
+                  className="px-2.5 py-1 rounded-full text-[11px] border flex items-center gap-1"
+                  style={{
+                    background: WUXING_BG[STEM_WUXING[h.stem]],
+                    borderColor: WUXING_COLOR[STEM_WUXING[h.stem]] + "33",
+                    color: WUXING_COLOR[STEM_WUXING[h.stem]]
+                  }}
+                >
+                  <b className="font-serif">{STEMS[h.stem]}</b>
+                  <span className="text-[10px] opacity-80">{tenGod(dayStem, h.stem)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function WuxingCircles({ count, pct }) {
+      return (
+        <div className="grid grid-cols-5 gap-1.5 sm:gap-2.5">
+          {["木", "火", "土", "金", "水"].map((k) => (
+            <div key={k} className="rounded-[16px] bg-white border border-stone-200/60 p-2 sm:p-3 flex flex-col items-center gap-2 min-w-0">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-medium text-white" style={{ background: WUXING_COLOR[k] }}>
+                {count[k] || 0}
+              </div>
+              <div className="text-[11px] tracking-widest" style={{ color: WUXING_COLOR[k] }}>{k}</div>
+              <div className="text-[10px] text-stone-400">{pct[k]}%</div>
+              <div className="w-full h-1 rounded-full bg-stone-100 overflow-hidden">
+                <div className="h-full" style={{ width: `${pct[k]}%`, background: WUXING_COLOR[k] }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    function PersonalTab() {
+      const today = getHKTParts(Date.now());
+      const [y, setY] = useState(today.year);
+      const [m, setM] = useState(today.month);
+      const [d, setD] = useState(today.date);
+      const [hh, setHh] = useState(today.hour);
+      const [mm, setMm] = useState(today.minute);
+      const [lon, setLon] = useState(114.17);
+      const [useTrue, setUseTrue] = useState(true);
+      const [lateZi, setLateZi] = useState(false);
+
+      const bazi = useMemo(() => {
+        try {
+          return calculateBazi({ y, m, d, hh, mm, lon, useTrue, lateZi });
+        } catch {
+          return null;
+        }
+      }, [y, m, d, hh, mm, lon, useTrue, lateZi]);
+
+      const radarData = bazi ? Object.entries(bazi.wuxingCount).map(([k, v]) => ({ subject: k, A: v, fullMark: 4 })) : [];
+
+      return (
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 md:px-10 py-6 md:py-8 flex flex-col gap-6">
+          <Card className="p-5 md:p-6">
+            <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-3 items-end">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] tracking-widest text-stone-500">年 YEAR</label>
+                <InputPill type="number" value={y} onChange={(e) => setY(parseInt(e.target.value) || 2000)} className="w-full sm:w-[92px]" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] tracking-widest text-stone-500">月</label>
+                <InputPill type="number" value={m} onChange={(e) => setM(parseInt(e.target.value) || 1)} className="w-full sm:w-[68px]" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] tracking-widest text-stone-500">日</label>
+                <InputPill type="number" value={d} onChange={(e) => setD(parseInt(e.target.value) || 1)} className="w-full sm:w-[68px]" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] tracking-widest text-stone-500">時</label>
+                <InputPill type="number" value={hh} onChange={(e) => setHh(parseInt(e.target.value) || 0)} className="w-full sm:w-[68px]" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] tracking-widest text-stone-500">分</label>
+                <InputPill type="number" value={mm} onChange={(e) => setMm(parseInt(e.target.value) || 0)} className="w-full sm:w-[68px]" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] tracking-widest text-stone-500">經度 LON</label>
+                <InputPill type="number" step="0.01" value={lon} onChange={(e) => setLon(parseFloat(e.target.value) || 114.17)} className="w-full sm:w-[108px]" />
+              </div>
+              <div className="col-span-3 flex flex-wrap gap-2 sm:ml-1">
+                <label className="flex items-center gap-2 text-[12px] tracking-widest text-stone-600 cursor-pointer px-3 py-2 rounded-full bg-white border border-stone-200/60">
+                  <input type="checkbox" checked={useTrue} onChange={(e) => setUseTrue(e.target.checked)} className="accent-stone-900" />真太阳时
+                </label>
+                <label className="flex items-center gap-2 text-[12px] tracking-widest text-stone-600 cursor-pointer px-3 py-2 rounded-full bg-white border border-stone-200/60">
+                  <input type="checkbox" checked={lateZi} onChange={(e) => setLateZi(e.target.checked)} className="accent-stone-900" />晚子
+                </label>
+              </div>
+            </div>
+          </Card>
+
+          {bazi && (
+            <div className="grid lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.9fr)] gap-6">
+              <div className="flex flex-col gap-6 min-w-0">
+                <Card className="p-5 md:p-7">
+                  <div className="flex flex-wrap justify-between items-center gap-2 mb-6">
+                    <h3 className="font-serif text-[16px] tracking-[0.2em] text-stone-800">四柱八字 · 真太陽時分界</h3>
+                  </div>
+                  <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
+                    <PillarDetailCard p={bazi.year} label="年柱" dayStem={bazi.day.stem} />
+                    <PillarDetailCard p={bazi.month} label="月柱" dayStem={bazi.day.stem} />
+                    <PillarDetailCard p={bazi.day} label="日柱" dayStem={bazi.day.stem} />
+                    <PillarDetailCard p={bazi.hour} label="時柱" dayStem={bazi.day.stem} />
+                  </div>
+                  <div className="mt-6 grid md:grid-cols-2 gap-3 text-[12px] leading-6 break-words">
+                    <div className="rounded-[14px] bg-stone-50 border border-stone-200/60 p-3 space-y-1">
+                      <div>公曆 <span className="font-medium">{formatHKT(bazi.civilMs)}</span></div>
+                      <div>真太陽 <span className="font-medium">{formatHKT(bazi.trueMs)}</span> <span className="text-stone-400">經度 {lon}° 均時差</span></div>
+                    </div>
+                    <div className="rounded-[14px] bg-stone-50 border border-stone-200/60 p-3 space-y-1">
+                      <div>立春 <span className="font-medium">{formatHKT(bazi.lichunMs)}</span> <span className="text-stone-400">年柱分界</span></div>
+                      <div>月令 <span className="font-medium">{bazi.jie.name} {formatHKT(bazi.jie.ms)}</span> · {BRANCHES[(2 + bazi.jie.monthIndex) % 12]}月</div>
+                      <div>HKT生日 {bazi.hktParts.year}年{bazi.hktParts.month}月{bazi.hktParts.date}日 {bazi.hktParts.hour}時{bazi.hktParts.minute}分</div>
+                    </div>
+                  </div>
+                  {/* Jie timeline horizontal scroll */}
+                  <div className="mt-6">
+                    <div className="text-[11px] tracking-[0.2em] text-stone-500 mb-2">
+                      節氣時間軸 · {bazi.hktParts.year}年 · 當前月令 {bazi.jie.name}
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-thin">
+                      {bazi.jieFullYear.map((j, idx) => {
+                        const isActive = j.monthIndex === bazi.jie.monthIndex;
+                        return (
+                          <div
+                            key={idx}
+                            className={`shrink-0 rounded-full px-3 py-1.5 border text-[11px] tracking-widest flex items-center gap-2 ${
+                              isActive ? "bg-stone-900 text-white border-stone-900" : "bg-white border-stone-200 text-stone-600"
+                            }`}
+                          >
+                            <span className="font-serif">{j.name}</span>
+                            <span className="text-[10px] opacity-70">{getHKTParts(j.ms).month}/{getHKTParts(j.ms).date}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </Card>
+              </div>
+
+              <div className="flex flex-col gap-6">
+                <Card className="p-5 md:p-6">
+                  <h3 className="font-serif text-[15px] tracking-[0.18em] text-stone-700 mb-4">五行分佈 · 五氣流轉</h3>
+                  <div className="flex gap-1 h-2 rounded-full overflow-hidden mb-4">
+                    {Object.entries(bazi.wuxingCount).map(([k, v]) => (
+                      <div key={k} style={{ width: `${(v / 8) * 100}%`, background: WUXING_COLOR[k] }} />
+                    ))}
+                  </div>
+                  <WuxingCircles count={bazi.wuxingCount} pct={bazi.wuxingPct} />
+                  <div className="h-[200px] mt-4">
+                    <WuxingRadarChart data={radarData} />
+                  </div>
+                </Card>
+
+                <div className="rounded-[20px] bg-stone-900 text-stone-100 p-5 md:p-6 border border-stone-800 shadow-[0_8px_32px_rgba(0,0,0,0.18)]">
+                  <div className="text-[11px] tracking-[0.2em] text-stone-400 mb-3">命盤摘要 · SUMMARY</div>
+                  <div className="font-serif text-[18px] tracking-widest mb-3">
+                    {bazi.year.stemName}{bazi.year.branchName}年 {bazi.month.stemName}{bazi.month.branchName}月 {bazi.day.stemName}{bazi.day.branchName}日 {bazi.hour.stemName}{bazi.hour.branchName}時
+                  </div>
+                  <div className="text-[12px] leading-6 text-stone-300 space-y-1">
+                    <div>
+                      日主 <span className="text-white">{bazi.day.stemName}{bazi.day.branchName}</span> · {STEM_WUXING[bazi.day.stem]} · 十神格局以日主為中心，月令 {bazi.jie.name} 得令與否需參藏干。
+                    </div>
+                    <div>
+                      五行以 <span className="text-white">{Object.entries(bazi.wuxingCount).sort((a, b) => b[1] - a[1])[0]?.[0]}</span> 為主氣，缺氣互補參考合盤。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Batch 2: 合盤 Tab (1:1 還原自 latest_bazi_source.tsx)
+    function BaziInputMini({ label, value, onChange }) {
+      return (
+        <div className="rounded-[20px] bg-white/70 backdrop-blur border border-stone-200/60 p-4 shadow-sm flex flex-col gap-3">
+          <div className="text-[11px] tracking-[0.2em] text-stone-500 border border-stone-200 rounded-full px-3 py-1 bg-white w-fit">{label}</div>
+          <div className="grid grid-cols-3 gap-2">
+            <InputPill type="number" placeholder="年" value={value.y} onChange={(e) => onChange({ ...value, y: parseInt(e.target.value) || 2000 })} />
+            <InputPill type="number" placeholder="月" value={value.m} onChange={(e) => onChange({ ...value, m: parseInt(e.target.value) || 1 })} />
+            <InputPill type="number" placeholder="日" value={value.d} onChange={(e) => onChange({ ...value, d: parseInt(e.target.value) || 1 })} />
+            <InputPill type="number" placeholder="时" value={value.hh} onChange={(e) => onChange({ ...value, hh: parseInt(e.target.value) || 0 })} />
+            <InputPill type="number" placeholder="分" value={value.mm} onChange={(e) => onChange({ ...value, mm: parseInt(e.target.value) || 0 })} />
+            <InputPill type="number" step="0.01" placeholder="经度" value={value.lon} onChange={(e) => onChange({ ...value, lon: parseFloat(e.target.value) || 114.17 })} />
+          </div>
+        </div>
+      );
+    }
+
+    function HepanTab() {
+      const [aInput, setAInput] = useState({ y: 1990, m: 5, d: 15, hh: 10, mm: 30, lon: 114.17, useTrue: true, lateZi: false });
+      const [bInput, setBInput] = useState({ y: 1992, m: 8, d: 22, hh: 14, mm: 0, lon: 121.47, useTrue: true, lateZi: false });
+      const baziA = useMemo(() => calculateBazi(aInput), [aInput]);
+      const baziB = useMemo(() => calculateBazi(bInput), [bInput]);
+      const hepan = useMemo(() => calcHepan(baziA, baziB), [baziA, baziB]);
+
+      const PillarRow = ({ b }) => (
+        <div className="grid grid-cols-4 gap-2">
+          {[b.year, b.month, b.day, b.hour].map((p, i) => (
+            <div key={i} className="rounded-[14px] bg-white border border-stone-200/60 p-2 flex flex-col items-center gap-1">
+              <span className="text-[10px] tracking-widest text-stone-500">{["年", "月", "日", "時"][i]}</span>
+              <span className="text-[10px]" style={{ color: WUXING_COLOR[STEM_WUXING[p.stem]] }}>{p.tenGod}</span>
+              <span className="font-serif text-[20px] font-medium" style={{ color: WUXING_COLOR[STEM_WUXING[p.stem]] }}>{p.stemName}</span>
+              <span className="font-serif text-[20px] font-medium" style={{ color: WUXING_COLOR[STEM_WUXING[HIDDEN[p.branch][0].stem]] }}>{p.branchName}</span>
+            </div>
+          ))}
+        </div>
+      );
+
+      return (
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 md:px-10 py-6 md:py-8 flex flex-col gap-6">
+          <div className="grid md:grid-cols-2 gap-5">
+            <BaziInputMini label="A 造 · 乾/坤" value={aInput} onChange={setAInput} />
+            <BaziInputMini label="B 造 · 乾/坤" value={bInput} onChange={setBInput} />
+          </div>
+          <div className="grid lg:grid-cols-2 gap-6">
+            <Card className="p-5 md:p-6">
+              <h4 className="font-serif tracking-[0.18em] text-[13px] mb-4">
+                A {baziA.year.stemName}{baziA.year.branchName} {baziA.month.stemName}{baziA.month.branchName} {baziA.day.stemName}{baziA.day.branchName} {baziA.hour.stemName}{baziA.hour.branchName} · {baziA.day.tenGod}
+              </h4>
+              <PillarRow b={baziA} />
+              <div className="mt-4 flex gap-2 flex-wrap">
+                {Object.entries(baziA.wuxingCount).map(([k, v]) => (
+                  <span key={k} className="px-2.5 py-1 rounded-full text-[11px] border" style={{ background: WUXING_BG[k], borderColor: WUXING_COLOR[k] + "33", color: WUXING_COLOR[k] }}>
+                    {k}{v}
+                  </span>
+                ))}
+              </div>
+            </Card>
+            <Card className="p-5 md:p-6">
+              <h4 className="font-serif tracking-[0.18em] text-[13px] mb-4">
+                B {baziB.year.stemName}{baziB.year.branchName} {baziB.month.stemName}{baziB.month.branchName} {baziB.day.stemName}{baziB.day.branchName} {baziB.hour.stemName}{baziB.hour.branchName} · {baziB.day.tenGod}
+              </h4>
+              <PillarRow b={baziB} />
+              <div className="mt-4 flex gap-2 flex-wrap">
+                {Object.entries(baziB.wuxingCount).map(([k, v]) => (
+                  <span key={k} className="px-2.5 py-1 rounded-full text-[11px] border" style={{ background: WUXING_BG[k], borderColor: WUXING_COLOR[k] + "33", color: WUXING_COLOR[k] }}>
+                    {k}{v}
+                  </span>
+                ))}
+              </div>
+            </Card>
+          </div>
+          <Card className="p-6 md:p-8">
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+              <h3 className="font-serif tracking-[0.2em] text-[16px]">合盤解析 · 天合地合沖害</h3>
+              <div className="flex items-center gap-3">
+                <div className="h-2 w-32 bg-stone-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-stone-900" style={{ width: `${hepan.score}%` }} />
+                </div>
+                <span className="px-4 py-1.5 rounded-full text-[12px] tracking-widest bg-stone-900 text-white">綜合 {hepan.score} 分</span>
+              </div>
+            </div>
+            <div className="grid lg:grid-cols-3 gap-6 text-[12px] leading-7">
+              <div className="rounded-[16px] bg-stone-50 border border-stone-200/60 p-4 space-y-3">
+                <div className="text-[11px] tracking-[0.2em] text-stone-500">五行互補</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {hepan.complementTags.length ? (
+                    hepan.complementTags.map((t, i) => (
+                      <span key={i} className="px-2.5 py-1 rounded-full bg-white border border-stone-200 text-[11px]">{t}</span>
+                    ))
+                  ) : (
+                    <span className="text-stone-400">五行相對均衡，無明顯缺補</span>
+                  )}
+                </div>
+                <div className="text-[11px] tracking-[0.2em] text-stone-500 pt-2">十神關係 · 日主互看</div>
+                <div className="bg-white rounded-full px-3 py-2 border border-stone-200">
+                  A日主對B: <b>{hepan.godAB}</b> · B日主對A: <b>{hepan.godBA}</b>
+                </div>
+              </div>
+              <div className="rounded-[16px] bg-stone-50 border border-stone-200/60 p-4 space-y-3">
+                <div className="text-[11px] tracking-[0.2em] text-stone-500">天合地合 · 沖害</div>
+                <div className="flex gap-2 flex-wrap">
+                  <span className="px-3 py-1 rounded-full bg-white border border-stone-200">天合 {hepan.tianHeCount}</span>
+                  <span className="px-3 py-1 rounded-full bg-white border border-stone-200">六合 {hepan.liuHeCount}</span>
+                  <span className="px-3 py-1 rounded-full bg-white border border-stone-200">三合 {hepan.sanHeCount}</span>
+                  <span className="px-3 py-1 rounded-full bg-[#FBE9E7] border border-red-200 text-[#C1332A]">相沖 {hepan.chongCount}</span>
+                  <span className="px-3 py-1 rounded-full bg-stone-100 border border-stone-200">六害 {hepan.haiCount}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {hepan.details.map((d, i) => (
+                    <span key={i} className="px-2.5 py-1 rounded-full bg-white border border-stone-200 text-[11px]">{d}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-[20px] bg-stone-900 text-stone-100 p-5">
+                <div className="text-[11px] tracking-[0.2em] text-stone-400 mb-3">評分構成 60%互補+40%合沖 · 非宿命論</div>
+                <div className="text-[12px] leading-6 text-stone-300 space-y-2">
+                  <div>天合地合加分，沖害減分，五行互補加分。適用於婚戀、合伙參考。</div>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    // Batch 3: 擇日 Tab (對齊 Bazi-Zeri-Complete-Prompt.md + 原裝命主生辰設定面板)
+    function ZeriTab() {
+      const hktNow = getHKTParts(Date.now());
+      const [startY, setStartY] = useState(hktNow.year);
+      const [startM, setStartM] = useState(hktNow.month);
+      const [startD, setStartD] = useState(hktNow.date);
+      const [range, setRange] = useState(3);
+      const [eventType, setEventType] = useState("结婚");
+
+      // 命主生辰（用於避沖、計用神）
+      const [ownerDate, setOwnerDate] = useState("1992-02-04");
+      const [ownerTime, setOwnerTime] = useState("04:15");
+      const [ownerUseTrue, setOwnerUseTrue] = useState(true);
+      const [ownerLateZi, setOwnerLateZi] = useState(false);
+      const [ownerBazi, setOwnerBazi] = useState(() => {
+        try {
+          return calculateBazi({ dateStr: "1992-02-04", timeStr: "04:15", lon: 114.17, useTrue: true, lateZi: false });
+        } catch {
+          return null;
+        }
+      });
+
+      const handleLoadOwnerBazi = (useTrueOverride, lateZiOverride) => {
+        if (!ownerDate) return;
+        const uTrue = typeof useTrueOverride === "boolean" ? useTrueOverride : ownerUseTrue;
+        const lZi = typeof lateZiOverride === "boolean" ? lateZiOverride : ownerLateZi;
+        try {
+          const res = calculateBazi({
+            dateStr: ownerDate,
+            timeStr: ownerTime || "12:00",
+            lon: 114.17,
+            useTrue: uTrue,
+            lateZi: lZi
+          });
+          setOwnerBazi(res);
+        } catch (err) {
+          console.error("命主四柱計算失敗", err);
+        }
+      };
+
+      const handleClearOwnerBazi = () => {
+        setOwnerBazi(null);
+      };
+
+      const ownerWeakestWX = useMemo(() => {
+        if (!ownerBazi || !ownerBazi.wuxingCount) return null;
+        const entries = Object.entries(ownerBazi.wuxingCount);
+        entries.sort((a, b) => a[1] - b[1]);
+        return entries[0]?.[0] || null;
+      }, [ownerBazi]);
+
+      const days = useMemo(() => {
+        const list = [];
+        let curMs = parseCivilHKT(startY, startM, startD, 12, 0);
+        for (let i = 0; i < range; i++) {
+          const curHkt = getHKTParts(curMs + i * 86400000);
+          const dd = calcDayDetail(curHkt.year, curHkt.month, curHkt.date, eventType, ownerBazi);
+          list.push(dd);
+        }
+        return list;
+      }, [startY, startM, startD, range, eventType, ownerBazi]);
+
+      // 5 級吉凶 Badge 輔助函數 (對接 Bazi-Style.css: .badge-daji, .badge-zhongji, .badge-xiaoji, .badge-xiaoxiong, .badge-daxiong)
+      const getBadgeClass = (lvl) => {
+        switch (lvl) {
+          case "大吉": return "badge-daji shadow-sm";
+          case "中吉": return "badge-zhongji shadow-sm";
+          case "小吉": return "badge-xiaoji shadow-sm";
+          case "小凶": return "badge-xiaoxiong shadow-sm";
+          case "大凶": return "badge-daxiong shadow-sm";
+          default: return "badge-xiaoji shadow-sm";
+        }
+      };
+
+      const getScoreColor = (score) => {
+        if (score >= 88) return "#15803d"; // 大吉深綠
+        if (score >= 72) return "#2A7D4F"; // 中吉翡翠綠
+        if (score >= 55) return "#B68A2E"; // 小吉金色
+        if (score >= 32) return "#ea580c"; // 小凶橙色
+        return "#dc2626"; // 大凶紅色
+      };
+
+      return (
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 md:px-10 py-6 md:py-8 flex flex-col gap-6">
+          {/* 擇日設定 + 命主出生日期時間面板 */}
+          <div className="grid lg:grid-cols-[360px_1fr] gap-6 items-start">
+            {/* 左側：命主（用於避沖、計用神）+ 擇日設定 */}
+            <Card className="p-5 md:p-6 flex flex-col gap-5">
+              <div>
+                <h3 className="font-serif text-[16px] tracking-[0.2em] text-stone-800 mb-3">擇日設定</h3>
+                <div className="text-[11px] tracking-widest text-stone-500 mb-2">命主（用於避沖、計用神）</div>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <InputPill
+                    type="date"
+                    value={ownerDate}
+                    onChange={(e) => setOwnerDate(e.target.value)}
+                    className="w-full"
+                  />
+                  <InputPill
+                    type="time"
+                    value={ownerTime}
+                    onChange={(e) => setOwnerTime(e.target.value)}
+                    className="w-full"
+                  />
+                </div>
+                <div className="flex gap-2 mb-3">
+                  <label className="flex items-center gap-1.5 text-[11px] tracking-widest text-stone-600 cursor-pointer px-3 py-1.5 rounded-full bg-white border border-stone-200/60">
+                    <input
+                      type="checkbox"
+                      checked={ownerUseTrue}
+                      onChange={(e) => {
+                        const v = e.target.checked;
+                        setOwnerUseTrue(v);
+                        if (ownerBazi) handleLoadOwnerBazi(v, ownerLateZi);
+                      }}
+                      className="accent-stone-900"
+                    />
+                    真太阳时
+                  </label>
+                  <label className="flex items-center gap-1.5 text-[11px] tracking-widest text-stone-600 cursor-pointer px-3 py-1.5 rounded-full bg-white border border-stone-200/60">
+                    <input
+                      type="checkbox"
+                      checked={ownerLateZi}
+                      onChange={(e) => {
+                        const v = e.target.checked;
+                        setOwnerLateZi(v);
+                        if (ownerBazi) handleLoadOwnerBazi(ownerUseTrue, v);
+                      }}
+                      className="accent-stone-900"
+                    />
+                    晚子
+                  </label>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleLoadOwnerBazi()}
+                    className="flex-1 py-2.5 px-4 rounded-full bg-stone-900 text-white text-[12px] tracking-[0.16em] hover:bg-stone-800 transition shadow-sm"
+                  >
+                    載入命主四柱 + 用神
+                  </button>
+                  {ownerBazi && (
+                    <button
+                      onClick={handleClearOwnerBazi}
+                      title="清除命主設定（不計個人避沖）"
+                      className="px-3.5 py-2.5 rounded-full bg-white border border-stone-200 text-stone-500 text-[11px] hover:border-stone-300 hover:text-stone-800 transition"
+                    >
+                      清除
+                    </button>
+                  )}
+                </div>
+
+                {/* 顯示已載入的命主四柱與推估用神 */}
+                {ownerBazi ? (
+                  <div className="mt-4 pt-4 border-t border-stone-200/60">
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      {[
+                        { label: "年柱", gz: ownerBazi.yearGanzhi, stem: ownerBazi.year.stem },
+                        { label: "月柱", gz: ownerBazi.monthGanzhi, stem: ownerBazi.month.stem },
+                        { label: "日柱", gz: ownerBazi.dayGanzhi, stem: ownerBazi.day.stem },
+                        { label: "時柱", gz: ownerBazi.hourGanzhi, stem: ownerBazi.hour.stem }
+                      ].map((item, i) => (
+                        <div key={i} className="rounded-[12px] bg-[#FDFBF7] border border-stone-200/70 py-2 px-1">
+                          <div className="text-[10px] text-stone-400 mb-0.5">{item.label}</div>
+                          <div className="font-serif text-[14px] font-medium" style={{ color: WUXING_COLOR[STEM_WUXING[item.stem]] }}>
+                            {item.gz}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {ownerWeakestWX && (
+                      <div className="mt-3 text-[11px] text-stone-500 leading-5">
+                        用神推估：最弱五行{" "}
+                        <b style={{ color: WUXING_COLOR[ownerWeakestWX] }}>{ownerWeakestWX}</b>{" "}
+                        （以8字計），剖腹產與日常擇日優先補此用神並避沖年/月/日支
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-3 text-[11px] text-stone-400">
+                    尚未載入命主四柱（目前為通用黃道擇日，不計算個人避沖）
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-4 border-t border-stone-200/60 flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] tracking-widest text-stone-500">起始日 · HKT</label>
+                  <div className="flex gap-2">
+                    <InputPill type="number" value={startY} onChange={(e) => setStartY(parseInt(e.target.value) || 2025)} className="w-[86px]" />
+                    <InputPill type="number" value={startM} onChange={(e) => setStartM(parseInt(e.target.value) || 1)} className="w-[64px]" />
+                    <InputPill type="number" value={startD} onChange={(e) => setStartD(parseInt(e.target.value) || 1)} className="w-[64px]" />
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] tracking-widest text-stone-500">範圍</label>
+                  <SelectPill value={range} onChange={(e) => setRange(parseInt(e.target.value))}>
+                    <option value={3}>未來3天 · 精選</option>
+                    <option value={7}>未來7天 · 詳批</option>
+                  </SelectPill>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] tracking-widest text-stone-500">事件類型 · 用神</label>
+                  <SelectPill value={eventType} onChange={(e) => setEventType(e.target.value)}>
+                    {EVENT_TYPES.map((ev) => {
+                      const meta = EVENT_META[ev];
+                      return (
+                        <option key={ev} value={ev}>
+                          {ev} · {meta?.desc || meta?.wuxing?.join("/")}
+                        </option>
+                      );
+                    })}
+                  </SelectPill>
+                </div>
+                <div className="text-[11px] tracking-[0.14em] text-stone-500 bg-stone-50 border border-stone-200 rounded-[14px] px-3.5 py-2.5 leading-5">
+                  評分 = 日60% + 時辰Top2均值40%<br />
+                  黃道 / 神煞 / 官符 / 命主避沖用神
+                </div>
+              </div>
+            </Card>
+
+            {/* 右側：吉日榜列表 */}
+            <div className="flex flex-col gap-6">
+            {days.map((day, idx) => (
+              <Card key={idx} className="p-5 md:p-7 overflow-hidden">
+                {/* Top row */}
+                <div className="flex flex-wrap items-start justify-between gap-4 mb-5">
+                  <div className="flex items-center gap-4">
+                    <div className="w-[68px] h-[68px] rounded-[18px] bg-[#FDFBF7] border border-stone-200/60 flex flex-col items-center justify-center shadow-sm">
+                      <span className="text-[10px] tracking-[0.2em] text-stone-500">{day.hktMonth}月</span>
+                      <span className="font-serif text-[26px] text-stone-800 leading-none mt-1">{day.hktDate}</span>
+                      <span className="text-[10px] text-stone-400 mt-1">{BRANCHES[day.bazi.day.branch]}日</span>
+                    </div>
+                    <div className="flex flex-col gap-1.5 min-w-0">
+                      {/* 規範標題格式: 辛巳日·丙午年戊戌月·危令 */}
+                      <div className="font-serif text-[16px] tracking-[0.18em] text-stone-800">
+                        {day.bazi.day.stemName}{day.bazi.day.branchName}日 · {day.bazi.year.stemName}{day.bazi.year.branchName}年{day.bazi.month.stemName}{day.bazi.month.branchName}月 · {day.officerName}令
+                      </div>
+                      <div className="flex gap-1.5 flex-wrap items-center">
+                        <span
+                          className={`px-2.5 py-1 rounded-full border text-[11px] tracking-widest ${
+                            day.isYellow ? "bg-[#E6F2EA] border-[#2A7D4F]/20 text-[#2A7D4F]" : "bg-stone-100 border-stone-200 text-stone-500"
+                          }`}
+                        >
+                          {day.isYellow ? "黃道" : "黑道"} {day.officerName}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-full bg-white border border-stone-200 text-[11px]">
+                          沖{BRANCHES[day.clashBranch]} 煞{day.sha}
+                        </span>
+                        {day.specialTags.map((t, i) => (
+                          <span key={i} className="px-2.5 py-1 rounded-full bg-stone-900 text-white text-[11px] tracking-widest">{t}</span>
+                        ))}
+                      </div>
+                      <div className="flex gap-1.5 flex-wrap mt-1">
+                        {day.tags.map((t, i) => (
+                          <span key={i} className="px-2 py-1 rounded-full text-[11px] border bg-white border-stone-200/60 text-stone-600">{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <div className="text-[10px] tracking-[0.2em] text-stone-500">綜合 · BASE {day.baseScore} + TOP2 {day.top2Avg}</div>
+                      <div
+                        className="font-serif text-[28px] leading-none mt-1 font-bold"
+                        style={{ color: getScoreColor(day.finalScore) }}
+                      >
+                        {day.finalScore}
+                      </div>
+                      <div className="text-[11px] tracking-widest text-stone-400 mt-1">日{day.baseScore} + 時{day.top2Avg}</div>
+                    </div>
+                    {/* 5 級吉凶圓形 Badge */}
+                    <div
+                      className={`w-[56px] h-[56px] rounded-full flex items-center justify-center text-[14px] font-semibold tracking-wider ${getBadgeClass(day.level)}`}
+                    >
+                      {day.level}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Reasons */}
+                <div className="flex flex-wrap gap-1.5 mb-4">
+                  {day.reasons.map((r, i) => (
+                    <span key={i} className="px-2.5 py-1 rounded-full text-[11px] bg-[#FDFBF7] border border-stone-100 text-stone-500 tracking-wide">{r}</span>
+                  ))}
+                </div>
+
+                {/* Yi Ji */}
+                <div className="grid md:grid-cols-2 gap-3 mb-5">
+                  <div className="rounded-[14px] bg-[#E6F2EA]/70 border border-[#2A7D4F]/15 p-3.5">
+                    <div className="text-[11px] tracking-[0.2em] text-[#2A7D4F] mb-2 font-medium">宜 · {day.officerName}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {day.yi.length ? day.yi.map((y, i) => (
+                        <span key={i} className="px-2.5 py-1 rounded-full bg-white border border-[#2A7D4F]/15 text-[#2A7D4F] text-[11px]">{y}</span>
+                      )) : <span className="text-stone-400 text-[11px]">諸事不宜</span>}
+                    </div>
+                  </div>
+                  <div className="rounded-[14px] bg-[#FBE9E7]/60 border border-[#C1332A]/15 p-3.5">
+                    <div className="text-[11px] tracking-[0.2em] text-[#C1332A] mb-2 font-medium">忌 · {day.officerName}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {day.ji.length ? day.ji.map((j, i) => (
+                        <span key={i} className="px-2.5 py-1 rounded-full bg-white border border-[#C1332A]/15 text-[#C1332A] text-[11px]">{j}</span>
+                      )) : <span className="text-stone-400 text-[11px]">無明顯禁忌</span>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 12 hours grid 3 cols as original */}
+                <div className="text-[11px] tracking-[0.2em] text-stone-500 mb-3 flex items-center gap-2">
+                  <span className="h-px w-6 bg-stone-200" />十二時辰 · 擇吉時 Top2 均值計入40% · 時辰建除與十神
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {day.hours.map((h, i) => {
+                    const hourLabel = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"][h.branch];
+                    const timeRange = ["23-1", "1-3", "3-5", "5-7", "7-9", "9-11", "11-13", "13-15", "15-17", "17-19", "19-21", "21-23"][h.branch];
+                    const isJi = h.score >= 70;
+                    const isXiong = h.score < 50;
+                    return (
+                      <div
+                        key={i}
+                        className={`rounded-[16px] border p-3.5 flex flex-col gap-2 transition ${
+                          isJi
+                            ? "bg-[#E6F2EA]/40 border-[#2A7D4F]/20 shadow-sm"
+                            : !isXiong
+                            ? "bg-white/80 border-stone-200/60"
+                            : "bg-[#FBE9E7]/30 border-[#C1332A]/10"
+                        }`}
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="text-[12px] tracking-[0.18em] font-medium">{hourLabel}時 {timeRange} · {h.officer}</span>
+                          <span
+                            className={`text-[11px] px-2.5 py-1 rounded-full border ${
+                              h.level.includes("吉")
+                                ? "bg-[#E6F2EA] text-[#2A7D4F] border-[#2A7D4F]/20"
+                                : h.level.includes("平")
+                                ? "bg-[#FFF6D9] text-[#B68A2E] border-[#B68A2E]/20"
+                                : "bg-[#FBE9E7] text-[#C1332A] border-[#C1332A]/15"
+                            }`}
+                          >
+                            {h.level} {h.score}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-serif text-[18px] tracking-widest">{h.name}</span>
+                          <span className="text-[11px] text-stone-500">{h.tenGod}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {h.tags.map((t, ti) => (
+                            <span key={ti} className="text-[10px] px-2 py-1 rounded-full bg-[#FDFBF7] border border-stone-200/60">{t}</span>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Top hours summary dark card */}
+                <div className="mt-5 rounded-[16px] bg-stone-900 text-stone-100 p-4 flex flex-wrap gap-3 items-center border border-stone-800">
+                  <span className="text-[11px] tracking-[0.2em] text-stone-400">推薦吉時 · Top3</span>
+                  <div className="h-4 w-px bg-stone-700 hidden md:block" />
+                  <div className="flex flex-wrap gap-2">
+                    {day.topHours.map((th, i) => (
+                      <span
+                        key={i}
+                        className={`px-3 py-1.5 rounded-full text-[11px] tracking-widest border ${
+                          i === 0 ? "bg-white text-stone-900 border-white font-medium" : "bg-stone-800 text-stone-200 border-stone-700"
+                        }`}
+                      >
+                        {["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"][th.branch]}時 {th.name} {th.score}分 · {th.officer}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="ml-auto text-[11px] text-stone-500">
+                    日柱 {day.bazi.day.stemName}{day.bazi.day.branchName} · {day.bazi.day.tenGod} · 黃道{day.isYellow ? "是" : "否"}
+                  </span>
+                </div>
+              </Card>
+            ))}
+          </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ===== 查日腳 · 六十甲子小畚符 Tab (V2) =====
+    function RijiaoTab() {
+      const today = getHKTParts(Date.now());
+      const pad2 = (n) => String(n).padStart(2, "0");
+      const todayStr = `${today.year}-${pad2(today.month)}-${pad2(today.date)}`;
+      const initLunar = gregorianToLunar(today.year, today.month, today.date) || { y: today.year, m: 1, d: 1, leap: false };
+
+      const [mode, setMode] = useState("gregorian"); // "gregorian" | "lunar"
+      const [gDateStr, setGDateStr] = useState(todayStr);
+
+      const [lYear, setLYear] = useState(initLunar.y);
+      const [lMonth, setLMonth] = useState(initLunar.m);
+      const [lDay, setLDay] = useState(initLunar.d);
+      const [lLeap, setLLeap] = useState(initLunar.leap);
+
+      const [xbfList, setXbfList] = useState(() => (typeof XBF_DATA !== "undefined" ? XBF_DATA : []));
+
+      // 若透過 HTTP(S) 執行，優先同步讀取外部 查日腳.json；file:// 則直接使用 Rijiao-Data.js
+      useEffect(() => {
+        if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+          fetch("查日腳.json")
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+              if (Array.isArray(data) && data.length === 60) {
+                setXbfList(data);
+              }
+            })
+            .catch(() => {});
+        }
+      }, []);
+
+      const leapMonthOfYear = useMemo(() => rijiaoLeapMonth(lYear), [lYear]);
+      const maxLunarDays = useMemo(() => {
+        if (lLeap && leapMonthOfYear > 0 && lMonth === leapMonthOfYear) {
+          return rijiaoLeapDays(lYear);
+        }
+        return rijiaoMonthDays(lYear, lMonth);
+      }, [lYear, lMonth, lLeap, leapMonthOfYear]);
+
+      // 切換公曆/農曆模式時自動同步日期
+      const handleSwitchMode = (nextMode) => {
+        if (nextMode === mode) return;
+        if (nextMode === "lunar") {
+          const parts = gDateStr.split("-").map(Number);
+          if (parts.length === 3 && !parts.some(isNaN)) {
+            const l = gregorianToLunar(parts[0], parts[1], parts[2]);
+            if (l) {
+              setLYear(l.y);
+              setLMonth(l.m);
+              setLDay(l.d);
+              setLLeap(l.leap);
+            }
+          }
+        } else {
+          const g = lunarToGregorian(lYear, lMonth, Math.min(lDay, maxLunarDays), lLeap && lMonth === leapMonthOfYear);
+          if (g) {
+            setGDateStr(`${g.y}-${pad2(g.m)}-${pad2(g.d)}`);
+          }
+        }
+        setMode(nextMode);
+      };
+
+      const handleShiftDay = (delta) => {
+        if (!resolved || resolved.error) return;
+        const shifted = shiftGregorianDate(resolved.g.y, resolved.g.m, resolved.g.d, delta);
+        if (shifted.y < 1900 || (shifted.y === 1900 && shifted.m === 1 && shifted.d < 31) || shifted.y > 2100) return;
+        setGDateStr(`${shifted.y}-${pad2(shifted.m)}-${pad2(shifted.d)}`);
+        const l = gregorianToLunar(shifted.y, shifted.m, shifted.d);
+        if (l) {
+          setLYear(l.y);
+          setLMonth(l.m);
+          setLDay(l.d);
+          setLLeap(l.leap);
+        }
+      };
+
+      const handleResetToday = () => {
+        setGDateStr(todayStr);
+        const l = gregorianToLunar(today.year, today.month, today.date);
+        if (l) {
+          setLYear(l.y);
+          setLMonth(l.m);
+          setLDay(l.d);
+          setLLeap(l.leap);
+        }
+      };
+
+      const resolved = useMemo(() => {
+        let g = null;
+        let l = null;
+
+        if (mode === "gregorian") {
+          if (!gDateStr) return { error: "請選擇公曆日期" };
+          const parts = gDateStr.split("-").map(Number);
+          if (parts.length !== 3 || parts.some(isNaN)) return { error: "日期格式不正確" };
+          const [gy, gm, gd] = parts;
+          if (gy < 1900 || gy > 2100 || (gy === 1900 && gm === 1 && gd < 31)) {
+            return { error: "日期須在 1900年1月31日 至 2100年12月31日 之間" };
+          }
+          l = gregorianToLunar(gy, gm, gd);
+          if (!l) return { error: "日期超出農曆計算範圍" };
+          g = { y: gy, m: gm, d: gd };
+        } else {
+          const safeLeap = lLeap && leapMonthOfYear > 0 && lMonth === leapMonthOfYear;
+          const safeDay = Math.min(lDay, maxLunarDays);
+          g = lunarToGregorian(lYear, lMonth, safeDay, safeLeap);
+          if (!g) return { error: "無法轉換此農曆日期，請檢查年月日設定" };
+          l = { y: lYear, m: lMonth, d: safeDay, leap: safeLeap };
+        }
+
+        const dayInfo = getSexagenaryDay(g.y, g.m, g.d);
+        const yearGZ = getYearGanzhiSimple(l.y);
+        const xbf = xbfList[dayInfo.idx60] || {
+          n: "（待補）",
+          d: "—",
+          c: "暫無此日腳資料。",
+          s: "—",
+          r: "宜請法科師傅處理。"
+        };
+
+        const prevG = shiftGregorianDate(g.y, g.m, g.d, -1);
+        const nextG = shiftGregorianDate(g.y, g.m, g.d, 1);
+        const prevDayInfo = getSexagenaryDay(prevG.y, prevG.m, prevG.d);
+        const nextDayInfo = getSexagenaryDay(nextG.y, nextG.m, nextG.d);
+
+        const weekNames = ["日", "一", "二", "三", "四", "五", "六"];
+        const weekDay = weekNames[new Date(Date.UTC(g.y, g.m - 1, g.d)).getUTCDay()];
+
+        return { g, l, dayInfo, yearGZ, xbf, prevDayInfo, nextDayInfo, weekDay };
+      }, [mode, gDateStr, lYear, lMonth, lDay, lLeap, leapMonthOfYear, maxLunarDays, xbfList]);
+
+      const lunarYears = useMemo(() => {
+        const arr = [];
+        for (let y = 1900; y <= 2100; y++) arr.push(y);
+        return arr;
+      }, []);
+
+      const lunarDays = useMemo(() => {
+        const arr = [];
+        for (let d = 1; d <= maxLunarDays; d++) arr.push(d);
+        return arr;
+      }, [maxLunarDays]);
+
+      return (
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 md:px-10 py-6 md:py-8">
+          <div className="grid lg:grid-cols-[360px_1fr] gap-6 items-start">
+            {/* 左側：查日腳日期設定面板 */}
+            <Card className="p-5 md:p-6 flex flex-col gap-5 lg:sticky lg:top-6">
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <h2 className="font-serif text-[16px] tracking-[0.2em] text-stone-800">查日腳 · 小畚符</h2>
+                  <span className="text-[10px] tracking-[0.18em] px-2.5 py-1 rounded-full bg-stone-50 border border-stone-200 text-stone-500">
+                    六十甲子
+                  </span>
+                </div>
+                <p className="text-[12px] text-stone-500 leading-5">
+                  輸入發病日期，查對六十甲子日腳，得知沖犯何方煞神、主病徵狀及化解之法。
+                </p>
+              </div>
+
+              {/* 公曆 / 農曆 切換 */}
+              <div className="flex gap-1.5 rounded-full bg-stone-100/80 p-1 border border-stone-200/60" role="tablist" aria-label="曆法選擇">
+                <button
+                  role="tab"
+                  aria-selected={mode === "gregorian"}
+                  onClick={() => handleSwitchMode("gregorian")}
+                  className={`flex-1 py-2 rounded-full text-[12px] tracking-[0.14em] transition ${
+                    mode === "gregorian"
+                      ? "bg-stone-900 text-white shadow-sm"
+                      : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  公曆（西曆）
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={mode === "lunar"}
+                  onClick={() => handleSwitchMode("lunar")}
+                  className={`flex-1 py-2 rounded-full text-[12px] tracking-[0.14em] transition ${
+                    mode === "lunar"
+                      ? "bg-stone-900 text-white shadow-sm"
+                      : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  農曆（陰曆）
+                </button>
+              </div>
+
+              {/* 公曆輸入 */}
+              {mode === "gregorian" ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="rijiao-gdate" className="text-[11px] tracking-widest text-stone-500">
+                      發病日期 · 公曆
+                    </label>
+                    <InputPill
+                      id="rijiao-gdate"
+                      type="date"
+                      min="1900-01-31"
+                      max="2100-12-31"
+                      value={gDateStr}
+                      onChange={(e) => setGDateStr(e.target.value)}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              ) : (
+                /* 農曆輸入 */
+                <div className="flex flex-col gap-3">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="rijiao-lyear" className="text-[11px] tracking-widest text-stone-500">農曆年</label>
+                      <SelectPill
+                        id="rijiao-lyear"
+                        value={lYear}
+                        onChange={(e) => {
+                          const ny = parseInt(e.target.value, 10);
+                          setLYear(ny);
+                          const nLeap = rijiaoLeapMonth(ny);
+                          if (nLeap === 0 || lMonth !== nLeap) setLLeap(false);
+                        }}
+                        className="w-full"
+                      >
+                        {lunarYears.map((y) => (
+                          <option key={y} value={y}>{y}年</option>
+                        ))}
+                      </SelectPill>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="rijiao-lmonth" className="text-[11px] tracking-widest text-stone-500">農曆月</label>
+                      <SelectPill
+                        id="rijiao-lmonth"
+                        value={lMonth}
+                        onChange={(e) => {
+                          const nm = parseInt(e.target.value, 10);
+                          setLMonth(nm);
+                          if (nm !== leapMonthOfYear) setLLeap(false);
+                        }}
+                        className="w-full"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                          <option key={m} value={m}>{m}月</option>
+                        ))}
+                      </SelectPill>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="rijiao-lday" className="text-[11px] tracking-widest text-stone-500">農曆日</label>
+                      <SelectPill
+                        id="rijiao-lday"
+                        value={Math.min(lDay, maxLunarDays)}
+                        onChange={(e) => setLDay(parseInt(e.target.value, 10))}
+                        className="w-full"
+                      >
+                        {lunarDays.map((d) => (
+                          <option key={d} value={d}>{d}日</option>
+                        ))}
+                      </SelectPill>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label
+                      className={`flex items-center gap-2 text-[12px] tracking-widest px-3 py-1.5 rounded-full border transition ${
+                        leapMonthOfYear > 0
+                          ? "bg-white border-stone-200/80 text-stone-700 cursor-pointer"
+                          : "bg-stone-50 border-stone-200/50 text-stone-400 cursor-not-allowed opacity-60"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        disabled={leapMonthOfYear === 0}
+                        checked={lLeap && leapMonthOfYear > 0 && lMonth === leapMonthOfYear}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setLLeap(checked);
+                          if (checked && leapMonthOfYear > 0) {
+                            setLMonth(leapMonthOfYear);
+                          }
+                        }}
+                        className="accent-stone-900"
+                      />
+                      {leapMonthOfYear > 0 ? `閏${leapMonthOfYear}月` : "該年無閏月"}
+                    </label>
+                    <span className="text-[11px] text-stone-400">本月 {maxLunarDays} 天</span>
+                  </div>
+                </div>
+              )}
+
+              {/* 快速前後推算按鈕 */}
+              <div className="pt-3 border-t border-stone-200/60 flex flex-col gap-2.5">
+                <div className="text-[11px] tracking-widest text-stone-500">快速推算比對</div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => handleShiftDay(-1)}
+                    className="py-2 px-2.5 rounded-full bg-white border border-stone-200 text-[12px] text-stone-600 hover:border-stone-400 hover:text-stone-900 transition"
+                  >
+                    ← 前一日
+                  </button>
+                  <button
+                    onClick={handleResetToday}
+                    className="py-2 px-2.5 rounded-full bg-stone-900 text-white text-[12px] tracking-wider hover:bg-stone-800 transition shadow-sm"
+                  >
+                    今日
+                  </button>
+                  <button
+                    onClick={() => handleShiftDay(1)}
+                    className="py-2 px-2.5 rounded-full bg-white border border-stone-200 text-[12px] text-stone-600 hover:border-stone-400 hover:text-stone-900 transition"
+                  >
+                    後一日 →
+                  </button>
+                </div>
+              </div>
+
+              {/* 參考說明 */}
+              <div className="text-[11px] tracking-[0.12em] text-stone-500 bg-stone-50 border border-stone-200 rounded-[14px] px-3.5 py-2.5 leading-5">
+                依發病日干支對照六十甲子<br />
+                資料來源：香港民間《通勝》小畚符章節
+              </div>
+            </Card>
+
+            {/* 右側：日腳與小畚符詳解 */}
+            <div className="flex flex-col gap-6">
+              {resolved.error ? (
+                <Card className="p-8 text-center">
+                  <div className="font-serif text-[16px] text-[#C1332A] tracking-widest mb-2">日期無法換算</div>
+                  <p className="text-[13px] text-stone-500">{resolved.error}</p>
+                </Card>
+              ) : (
+                <>
+                  {/* 卡片 1：日期對照與日柱干支 */}
+                  <Card className="p-5 md:p-7">
+                    <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-[68px] h-[68px] rounded-[18px] bg-[#FDFBF7] border border-stone-200/60 flex flex-col items-center justify-center shadow-sm shrink-0">
+                          <span className="text-[10px] tracking-[0.2em] text-stone-500">{resolved.g.m}月</span>
+                          <span className="font-serif text-[26px] text-stone-800 leading-none mt-1">{resolved.g.d}</span>
+                          <span className="text-[10px] text-stone-400 mt-1">週{resolved.weekDay}</span>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <div className="font-serif text-[17px] md:text-[18px] tracking-[0.18em] text-stone-800">
+                            {resolved.dayInfo.ganzhi}日 · {resolved.dayInfo.nayin}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 items-center text-[12px]">
+                            <span className="px-2.5 py-1 rounded-full bg-stone-50 border border-stone-200/80 text-stone-700">
+                              公曆 {resolved.g.y}年{resolved.g.m}月{resolved.g.d}日
+                            </span>
+                            <span className="px-2.5 py-1 rounded-full bg-[#FFF6D9]/70 border border-[#B68A2E]/20 text-[#8a651a]">
+                              農曆 {resolved.l.y}年{resolved.l.leap ? "閏" : ""}{resolved.l.m}月{resolved.l.d}日
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-[11px] tracking-widest text-stone-500 bg-stone-50 border border-stone-200 rounded-full px-3 py-1">
+                        六十甲子第 {resolved.dayInfo.idx60 + 1} 位
+                      </span>
+                    </div>
+
+                    {/* 日柱天干地支大字顯示（呼應個人排盤四柱卡風格） */}
+                    <div className="rounded-[18px] bg-[#FDFBF7]/90 border border-stone-200/60 p-5 md:p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+                      <div className="flex items-end gap-5">
+                        <div className="flex flex-col items-center">
+                          <span className="text-[10px] tracking-[0.2em] text-stone-400 mb-1">天干 · {resolved.dayInfo.stemWX}</span>
+                          <span
+                            className="font-serif text-[48px] md:text-[56px] leading-none font-[600]"
+                            style={{ color: WUXING_COLOR[resolved.dayInfo.stemWX] }}
+                          >
+                            {resolved.dayInfo.stemName}
+                          </span>
+                        </div>
+                        <div className="w-px h-14 bg-stone-200/70 mb-1" />
+                        <div className="flex flex-col items-center">
+                          <span className="text-[10px] tracking-[0.2em] text-stone-400 mb-1">地支 · {resolved.dayInfo.branchWX}</span>
+                          <span
+                            className="font-serif text-[48px] md:text-[56px] leading-none font-[600]"
+                            style={{ color: WUXING_COLOR[resolved.dayInfo.branchWX] }}
+                          >
+                            {resolved.dayInfo.branchName}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap justify-center md:justify-end gap-2">
+                        <span
+                          className="px-3 py-1.5 rounded-full text-[12px] border font-medium"
+                          style={{
+                            background: WUXING_BG[resolved.dayInfo.stemWX],
+                            borderColor: WUXING_COLOR[resolved.dayInfo.stemWX] + "33",
+                            color: WUXING_COLOR[resolved.dayInfo.stemWX]
+                          }}
+                        >
+                          天干 {resolved.dayInfo.stemName}（{resolved.dayInfo.stemWX}）
+                        </span>
+                        <span
+                          className="px-3 py-1.5 rounded-full text-[12px] border font-medium"
+                          style={{
+                            background: WUXING_BG[resolved.dayInfo.branchWX],
+                            borderColor: WUXING_COLOR[resolved.dayInfo.branchWX] + "33",
+                            color: WUXING_COLOR[resolved.dayInfo.branchWX]
+                          }}
+                        >
+                          地支 {resolved.dayInfo.branchName}（{resolved.dayInfo.branchWX}）
+                        </span>
+                        <span className="px-3 py-1.5 rounded-full text-[12px] bg-white border border-stone-200 text-stone-700">
+                          納音 · {resolved.dayInfo.nayin}
+                        </span>
+                        <span className="px-3 py-1.5 rounded-full text-[12px] bg-white border border-stone-200 text-stone-700">
+                          日支生肖 · {resolved.dayInfo.zodiac}
+                        </span>
+                        <span className="px-3 py-1.5 rounded-full text-[12px] bg-white border border-stone-200 text-stone-700">
+                          農曆年干支 · {resolved.yearGZ.ganzhi}年（{resolved.yearGZ.zodiac}）
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 前後一日快速切換條 */}
+                    <div className="mt-4 flex items-center justify-between gap-2 text-[12px]">
+                      <button
+                        onClick={() => handleShiftDay(-1)}
+                        className="px-3.5 py-1.5 rounded-full bg-white border border-stone-200/80 text-stone-600 hover:border-stone-400 hover:text-stone-900 transition"
+                      >
+                        ← 前一日 · {resolved.prevDayInfo.ganzhi}日
+                      </button>
+                      <span className="text-[11px] tracking-[0.16em] text-stone-400 hidden sm:inline">
+                        症狀未合時可前後推算比對
+                      </span>
+                      <button
+                        onClick={() => handleShiftDay(1)}
+                        className="px-3.5 py-1.5 rounded-full bg-white border border-stone-200/80 text-stone-600 hover:border-stone-400 hover:text-stone-900 transition"
+                      >
+                        後一日 · {resolved.nextDayInfo.ganzhi}日 →
+                      </button>
+                    </div>
+                  </Card>
+
+                  {/* 卡片 2：小畚符詳解 */}
+                  <Card className="p-5 md:p-7">
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-5 pb-4 border-b border-stone-200/60">
+                      <div className="flex items-center gap-3">
+                        <h3 className="font-serif text-[18px] tracking-[0.2em] text-stone-800">
+                          小畚符 · {resolved.dayInfo.ganzhi}日
+                        </h3>
+                        <span className="px-3 py-1 rounded-full bg-stone-900 text-white text-[11px] tracking-widest">
+                          犯煞：{resolved.xbf.n}
+                        </span>
+                      </div>
+                      <span className="px-3 py-1 rounded-full bg-[#FFF6D9] border border-[#B68A2E]/25 text-[#8a651a] text-[12px] font-medium tracking-wider">
+                        沖犯方位 · {resolved.xbf.d}
+                      </span>
+                    </div>
+
+                    {/* 沖犯詳情 */}
+                    <div className="rounded-[14px] bg-[#FDFBF7] border border-stone-200/70 p-4 mb-4">
+                      <div className="text-[11px] tracking-[0.2em] text-stone-500 mb-2 font-medium">沖犯詳情</div>
+                      <p className="font-serif text-[15px] text-stone-800 leading-8">{resolved.xbf.c}</p>
+                    </div>
+
+                    {/* 病徵 & 化解方法（左右雙欄，呼應擇日宜/忌風格） */}
+                    <div className="grid md:grid-cols-2 gap-4 mb-5">
+                      <div className="rounded-[14px] bg-[#FBE9E7]/60 border border-[#C1332A]/15 p-4">
+                        <div className="text-[11px] tracking-[0.2em] text-[#C1332A] mb-2 font-medium">主病徵狀</div>
+                        <p className="font-serif text-[15px] text-stone-800 leading-8">{resolved.xbf.s}</p>
+                      </div>
+                      <div className="rounded-[14px] bg-[#E6F2EA]/70 border border-[#2A7D4F]/15 p-4">
+                        <div className="text-[11px] tracking-[0.2em] text-[#2A7D4F] mb-2 font-medium">化解方法</div>
+                        <p className="font-serif text-[15px] text-stone-800 leading-8">{resolved.xbf.r}</p>
+                      </div>
+                    </div>
+
+                    {/* 深色摘要條（呼應擇日 Top3 深色卡片） */}
+                    <div className="rounded-[16px] bg-stone-900 text-stone-100 p-4 flex flex-wrap gap-3 items-center border border-stone-800">
+                      <span className="text-[11px] tracking-[0.2em] text-stone-400">日腳摘要</span>
+                      <div className="h-4 w-px bg-stone-700 hidden md:block" />
+                      <div className="flex flex-wrap gap-2">
+                        <span className="px-3 py-1 rounded-full text-[11px] tracking-widest bg-white text-stone-900 font-medium">
+                          {resolved.dayInfo.ganzhi}日（第 {resolved.dayInfo.idx60 + 1} 位）
+                        </span>
+                        <span className="px-3 py-1 rounded-full text-[11px] tracking-widest bg-stone-800 text-stone-200 border border-stone-700">
+                          犯煞 · {resolved.xbf.n}
+                        </span>
+                        <span className="px-3 py-1 rounded-full text-[11px] tracking-widest bg-stone-800 text-stone-200 border border-stone-700">
+                          方位 · {resolved.xbf.d}
+                        </span>
+                      </div>
+                      <span className="ml-auto text-[11px] text-stone-400">
+                        納音 {resolved.dayInfo.nayin}
+                      </span>
+                    </div>
+
+                    {/* 民俗參考提示 */}
+                    <div className="mt-4 rounded-[14px] bg-[#FFF6D9]/45 border border-[#B68A2E]/20 px-4 py-3 text-[12px] text-stone-600 leading-6">
+                      ⚠ 以上資料源自民間《通勝》「小畚符」傳統，僅供民俗參考。如症狀不甚吻合，不妨點選上方「前一日 / 後一日」推算比對，取最接近者為準。如有實際身體不適，請務必配合正規醫療診治。
+                    </div>
+                  </Card>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const initialTab = (() => {
+        const h = window.location.hash.replace("#", "");
+        return ["personal", "hepan", "zeri", "rijiao"].includes(h) ? h : "personal";
+      })();
+      const [tab, setTab] = useState(initialTab);
+
+      return (
+        <div className="min-h-screen flex flex-col" style={{ paddingTop: "var(--safe-area-inset-top)", boxSizing: "border-box" }}>
+          <Header tab={tab} setTab={setTab} />
+          <main className="flex-1">
+            {tab === "personal" && <PersonalTab />}
+            {tab === "hepan" && <HepanTab />}
+            {tab === "zeri" && <ZeriTab />}
+            {tab === "rijiao" && <RijiaoTab />}
+          </main>
+          <footer className="py-8 text-center text-[11px] tracking-[0.2em] text-stone-400 border-t border-stone-200/60 mt-8 max-w-[1360px] mx-auto px-4 sm:px-6 md:px-10 w-full">
+            香港玄學 · 八字排盤 · 雙人合盤 · 黃道擇日 · 查日腳小畚符
+          </footer>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
