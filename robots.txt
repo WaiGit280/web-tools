@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://waigit280.github.io/web-tools/sitemap.xml
